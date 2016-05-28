@@ -31,7 +31,7 @@ func NewBotService(token string, isDebug bool) *BotSvc {
 
 type UserChat struct {
     user int
-    chat int
+    chat int64
 	// user *tgbotapi.User
 	// chat *tgbotapi.Chat
 }

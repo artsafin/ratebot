@@ -6,7 +6,7 @@ import (
 )
 
 type Alert struct {
-    chatId int
+    chatId int64
     instr string
     op string
     value float32
@@ -24,20 +24,20 @@ func (a *Alert) Matches(value float32) bool {
     return opIsMatch(a.op, value, a.value)
 }
 
-var alertsIndex = make(map[string]map[int][]*Alert)
+var alertsIndex = make(map[string]map[int64][]*Alert)
 
 var lock sync.Mutex
 
 func allocIndex(alert *Alert) {
     if _, ok := alertsIndex[alert.instr]; !ok {
-        alertsIndex[alert.instr] = make(map[int][]*Alert)
+        alertsIndex[alert.instr] = make(map[int64][]*Alert)
     }
     if _, ok := alertsIndex[alert.instr][alert.chatId]; !ok {
         alertsIndex[alert.instr][alert.chatId] = make([]*Alert, 0, 2)
     }
 }
 
-func NewAlert(chatId int, instr string, op string, value float32) (*Alert, error) {
+func NewAlert(chatId int64, instr string, op string, value float32) (*Alert, error) {
     if !hasInstrument(instr) {
         return nil, fmt.Errorf("Instrument not found")
     }
@@ -111,7 +111,7 @@ func GetAlertsByInstr(instr string) []*Alert {
     return res
 }
 
-func GetAlertsByChatId(chatId int) ([]*Alert, error) {
+func GetAlertsByChatId(chatId int64) ([]*Alert, error) {
     lock.Lock()
     defer lock.Unlock()
 

@@ -92,7 +92,7 @@ func instr() string {
     return "Supported instruments:\n\n" + strings.Join(alerts.GetInstr(), "\n")
 }
 
-func cancel(chatId int) *HandlerReply {
+func cancel(chatId int64) *HandlerReply {
     flows[chatId] = ChatFlow{""}
 
     return &HandlerReply{
@@ -105,7 +105,7 @@ func cancel(chatId int) *HandlerReply {
                 }
 }
 
-func forget(chatId int, text string) (*HandlerReply, error) {
+func forget(chatId int64, text string) (*HandlerReply, error) {
     userAlerts, err := alerts.GetAlertsByChatId(chatId)
     if err != nil {
         return nil, BotPublicErr("No registered alerts")
@@ -116,10 +116,20 @@ func forget(chatId int, text string) (*HandlerReply, error) {
             if err != nil {
                 cfg.ReplyMarkup = tgbotapi.ReplyKeyboardHide{HideKeyboard: true}
             } else {
+                btnsL := make([]tgbotapi.KeyboardButton, len(userAlerts)/2)
+                btnsR := make([]tgbotapi.KeyboardButton, len(userAlerts)/2+1)
+                for k, s := range userAlerts {
+                    if k <= len(userAlerts)/2 {
+                        btnsL[k] = tgbotapi.KeyboardButton{Text:s.String()}
+                    } else {
+                        btnsR[k] = tgbotapi.KeyboardButton{Text:s.String()}
+                    }
+                }
+
                 cfg.ReplyMarkup = tgbotapi.ReplyKeyboardMarkup{
-                    Keyboard: [][]string{
-                        alerts.AlertsArrayToStrings(userAlerts[len(userAlerts)/2:]),
-                        alerts.AlertsArrayToStrings(userAlerts[:len(userAlerts)/2]),
+                    Keyboard: [][]tgbotapi.KeyboardButton{
+                        btnsL,
+                        btnsR,
                     },
                 }
             }
@@ -153,7 +163,7 @@ func forget(chatId int, text string) (*HandlerReply, error) {
     return nil, nil
 }
 
-func alertList(chatId int) (*HandlerReply, error) {
+func alertList(chatId int64) (*HandlerReply, error) {
     userAlerts, err := alerts.GetAlertsByChatId(chatId)
     if err != nil {
         return nil, BotPublicErr("No registered alerts")
@@ -204,7 +214,7 @@ func parseAlertInput(text string) ([]string, error) {
     return result, nil
 }
 
-func alert(chatId int, fields []string) (*HandlerReply, error) {
+func alert(chatId int64, fields []string) (*HandlerReply, error) {
 
     fmt.Println("alert:", fields)
 

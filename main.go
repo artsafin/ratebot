@@ -7,7 +7,7 @@ import (
     // "github.com/artsafin/ratebot/alerts"
 )
 
-var srcAddr = flag.String("addr", "localhost:8080", "source service address")
+var url = flag.String("url", "localhost:80", "URL that will respond with JSON rates")
 var botToken = flag.String("token", "", "bot token")
 var debug = flag.Bool("debug", false, "run bot in debug mode")
 
