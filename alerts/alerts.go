@@ -6,10 +6,12 @@ import (
 )
 
 type Alert struct {
-    chatId int64
+    ChatId int64
+    userId int
     instr string
-    op string
-    value float32
+    op *Op
+    value float64
+    ttl int
 }
 
 func (a *Alert) isEqual(other *Alert) bool {
@@ -17,116 +19,140 @@ func (a *Alert) isEqual(other *Alert) bool {
 }
 
 func (a *Alert) String() string {
-    return fmt.Sprintf("%s %s %v", a.instr, a.op, a.value)
+    return fmt.Sprintf("%s %s %v (repeat %v)", a.instr, a.op.getShortName(), a.value, a.ttl)
 }
 
-func (a *Alert) Matches(value float32) bool {
-    return opIsMatch(a.op, value, a.value)
+func (a *Alert) StringShort() string {
+    return fmt.Sprintf("%s %s %v", a.instr, a.op.getShortName(), a.value)
 }
 
-var alertsIndex = make(map[string]map[int64][]*Alert)
+func (a *Alert) Test(value float64) bool {
+    return a.op.test(value, a.value)
+}
+func (a *Alert) TryExpire() {
+    a.ttl--
+    if a.ttl <= 0 {
+        RemoveAlert(a)
+    }
+}
+
+var alertsIndex = make(map[string]map[int][]*Alert)
 
 var lock sync.Mutex
 
 func allocIndex(alert *Alert) {
     if _, ok := alertsIndex[alert.instr]; !ok {
-        alertsIndex[alert.instr] = make(map[int64][]*Alert)
+        alertsIndex[alert.instr] = make(map[int][]*Alert)
     }
-    if _, ok := alertsIndex[alert.instr][alert.chatId]; !ok {
-        alertsIndex[alert.instr][alert.chatId] = make([]*Alert, 0, 2)
+    if _, ok := alertsIndex[alert.instr][alert.userId]; !ok {
+        alertsIndex[alert.instr][alert.userId] = make([]*Alert, 0, 2)
     }
 }
 
-func NewAlert(chatId int64, instr string, op string, value float32) (*Alert, error) {
-    if !hasInstrument(instr) {
-        return nil, fmt.Errorf("Instrument not found")
-    }
-    op = opNormalize(op)
-    if !opIsNormal(op) {
-        return nil, fmt.Errorf("Invalid OPERATION")
+func NewAlert(chatId int64, userId int, instr string, opStr string, value float64, ttl int) (*Alert, error) {
+    if len(instr) < 3 {
+        return nil, fmt.Errorf("Invalid instrument")
     }
 
-    return &Alert{chatId, instr, op, value}, nil
+    op, err := FindOpByString(opStr)
+    if err != nil {
+        return nil, err
+    }
+
+    return &Alert{chatId, userId, instr, op, value, ttl}, nil
 }
 
-func AddAlert(alert *Alert) {
+func Add(alert *Alert) error {
     lock.Lock()
     defer lock.Unlock()
 
     allocIndex(alert)
 
-    for _, v := range alertsIndex[alert.instr][alert.chatId] {
+    for _, v := range alertsIndex[alert.instr][alert.userId] {
         if v.isEqual(alert) {
-            return
+            return fmt.Errorf("Already subscribed")
         }
     }
 
-    alertsIndex[alert.instr][alert.chatId] = append(alertsIndex[alert.instr][alert.chatId], alert)
+    alertsIndex[alert.instr][alert.userId] = append(alertsIndex[alert.instr][alert.userId], alert)
+
+    return nil
 }
 
-func RemoveAlert(alert Alert) {
+func RemoveAlert(alert *Alert) {
     lock.Lock()
     defer lock.Unlock()
 
-    alerts, ok := alertsIndex[alert.instr][alert.chatId]
+    alerts, ok := alertsIndex[alert.instr][alert.userId]
     if !ok {
         return
     }
 
     for i, v := range alerts {
-        if v.isEqual(&alert) {
-            alertsIndex[alert.instr][alert.chatId] = append(alertsIndex[alert.instr][alert.chatId][:i], alertsIndex[alert.instr][alert.chatId][i+1:]...)
+        if v.isEqual(alert) {
+            alertsIndex[alert.instr][alert.userId] = append(alertsIndex[alert.instr][alert.userId][:i], alertsIndex[alert.instr][alert.userId][i+1:]...)
             break
         }
     }
 }
 
-func GetRegisteredInstr() []string {
+func GetAlertsBySymbol(instr string) []*Alert {
     lock.Lock()
     defer lock.Unlock()
 
-    keys := make([]string, 0, len(alertsIndex))
-
-    for k := range alertsIndex {
-        keys = append(keys, k)
-    }
-
-    return keys
-}
-
-func GetAlertsByInstr(instr string) []*Alert {
-    lock.Lock()
-    defer lock.Unlock()
-
-    byChat, ok := alertsIndex[instr]
+    byUser, ok := alertsIndex[instr]
     if !ok {
         return []*Alert{}
     }
 
-    res := make([]*Alert, len(byChat))
-    for _, chatAlerts := range byChat {
-        res = append(res, chatAlerts...)
+    res := make([]*Alert, 0)
+    for _, userAlerts := range byUser {
+        res = append(res, userAlerts...)
     }
 
     return res
 }
 
-func GetAlertsByChatId(chatId int64) ([]*Alert, error) {
+func GetAlertsByUserId(userId int) []*Alert {
     lock.Lock()
     defer lock.Unlock()
 
     res := make([]*Alert, 0)
 
-    for _, byChat := range alertsIndex {
-        if alerts, ok := byChat[chatId]; ok {
+    for _, byUser := range alertsIndex {
+        if alerts, ok := byUser[userId]; ok {
             res = append(res, alerts...)
         }
     }
 
-    if len(res) > 0 {
-        return res, nil
+    return res
+}
+
+func FilterUserAlerts(userId int, filterCb func(*Alert) bool) []*Alert {
+    lock.Lock()
+    defer lock.Unlock()
+
+    res := make([]*Alert, 0)
+
+    for _, byUser := range alertsIndex {
+        if alerts, ok := byUser[userId]; ok {
+            for _, alert := range alerts {
+                if filterCb(alert) {
+                    res = append(res, alert)
+                }
+            }
+        }
     }
-    return res, fmt.Errorf("chat not found")
+
+    return res
+}
+
+func FindUserAlert(userId int, filterCb func(*Alert) bool) *Alert {
+    all := FilterUserAlerts(userId, filterCb)
+    if len(all) > 0 {
+        return all[0]
+    }
+    return nil
 }
 
 func AlertsArrayToStrings(alerts []*Alert) []string {
